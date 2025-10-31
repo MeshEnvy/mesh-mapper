@@ -79,6 +79,7 @@ LORA_PRESETS = {
         "bandwidth": 250000,  # Hz
         "coding_rate": "4/8",
         "receiver_sensitivity": -134,  # dBm
+        "frequency_mhz": 906.875,  # US region, slot 20
         "description": "SF11, BW250, CR4/8"
     },
     "Long-Moderate": {
@@ -86,6 +87,7 @@ LORA_PRESETS = {
         "bandwidth": 125000,
         "coding_rate": "4/8",
         "receiver_sensitivity": -137,
+        "frequency_mhz": 907.375,  # US region, slot 21
         "description": "SF11, BW125, CR4/8"
     },
     "Long-Slow": {
@@ -93,6 +95,7 @@ LORA_PRESETS = {
         "bandwidth": 125000,
         "coding_rate": "4/8",
         "receiver_sensitivity": -140,
+        "frequency_mhz": 907.875,  # US region, slot 22
         "description": "SF12, BW125, CR4/8"
     },
     "Medium-Fast": {
@@ -100,6 +103,7 @@ LORA_PRESETS = {
         "bandwidth": 250000,
         "coding_rate": "4/8",
         "receiver_sensitivity": -131,
+        "frequency_mhz": 913.125,  # US region, slot 45
         "description": "SF10, BW250, CR4/8"
     },
     "Medium-Slow": {
@@ -107,6 +111,7 @@ LORA_PRESETS = {
         "bandwidth": 125000,
         "coding_rate": "4/8",
         "receiver_sensitivity": -137,
+        "frequency_mhz": 913.625,  # US region, slot 46
         "description": "SF11, BW125, CR4/8"
     },
     "Short-Fast": {
@@ -114,14 +119,13 @@ LORA_PRESETS = {
         "bandwidth": 250000,
         "coding_rate": "4/8",
         "receiver_sensitivity": -123,
+        "frequency_mhz": 918.875,  # US region, slot 68
         "description": "SF7, BW250, CR4/8"
     }
 }
 
 DEFAULT_CONFIG = {
-    "lora_preset": "Long-Fast",
-    "frequency_mhz": 915,
-    "tx_power_dbm": 27,  # ~0.5W
+    "tx_power_dbm": 27,  # ~0.5W (default, can be overridden per node in CSV)
     "fade_margin_db": 15,  # Conservative fade margin
     "analysis_radius_miles": 30,
     "dem_resolution_m": 30,  # 30 or 90
@@ -506,7 +510,7 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
     Calculate RF coverage for all nodes.
     
     Args:
-        nodes_df: DataFrame with columns: node_name, lat, lon, elev
+        nodes_df: DataFrame with columns: node_name, lat, lon, elev, preset, [tx_power_dbm]
         dem: Digital elevation model array
         transform: Rasterio transform
         config: Configuration dictionary
@@ -518,42 +522,12 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
     log_info("CALCULATING RF COVERAGE")
     log_info("="*80)
     
-    # Get LoRa preset parameters
-    preset = LORA_PRESETS[config['lora_preset']]
-    rx_sensitivity = preset['receiver_sensitivity']
-    frequency_hz = config['frequency_mhz'] * 1e6
-    log_debug(f"LoRa preset lookup: {config['lora_preset']}")
-    log_debug(f"Frequency calculation: {config['frequency_mhz']} MHz = {frequency_hz} Hz")
-    
-    log_info(f"\nLoRa Preset: {config['lora_preset']}")
-    log_info(f"  {preset['description']}")
-    log_info(f"  Receiver Sensitivity: {rx_sensitivity} dBm")
-    log_info(f"Frequency: {config['frequency_mhz']} MHz")
-    log_info(f"TX Power: {config['tx_power_dbm']} dBm")
     log_info(f"Fade Margin: {config['fade_margin_db']} dB")
     log_info(f"Analysis Radius: {config['analysis_radius_miles']} miles")
-    
-    # Calculate link budget
-    # Available signal at receiver = TX power + TX gain + RX gain - Path Loss - Fade Margin
-    # For link to close: RX signal must be >= RX sensitivity
-    # Therefore: TX power + TX gain + RX gain - Path Loss - Fade Margin >= RX sensitivity
-    # Max path loss = TX power + TX gain + RX gain - RX sensitivity - Fade Margin
     
     tx_gain = config['antenna_gain_dbi']
     rx_gain = config['antenna_gain_dbi']  # Assume same antenna on both ends
     log_debug(f"Antenna gains: TX={tx_gain} dBi, RX={rx_gain} dBi")
-    
-    max_path_loss = (config['tx_power_dbm'] + tx_gain + rx_gain - 
-                     rx_sensitivity - config['fade_margin_db'])
-    log_debug(f"Link budget calculation: {config['tx_power_dbm']} + {tx_gain} + {rx_gain} - {rx_sensitivity} - {config['fade_margin_db']} = {max_path_loss:.1f} dB")
-    
-    log_info(f"\nLink Budget:")
-    log_info(f"  TX Power: {config['tx_power_dbm']} dBm")
-    log_info(f"  TX Gain: {tx_gain} dBi")
-    log_info(f"  RX Gain: {rx_gain} dBi")
-    log_info(f"  RX Sensitivity: {rx_sensitivity} dBm")
-    log_info(f"  Fade Margin: {config['fade_margin_db']} dB")
-    log_info(f"  Maximum Path Loss: {max_path_loss:.1f} dB")
     
     # Initialize coverage dictionary
     coverage_data = {}
@@ -565,6 +539,42 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
         log_info(f"  Location: {node['lat']:.6f}, {node['lon']:.6f}")
         log_info(f"  Elevation: {node['elev']:.1f} ft ({feet_to_meters(node['elev']):.1f} m)")
         log_debug(f"Node index: {idx}")
+        
+        # Get per-node settings from CSV
+        preset_name = node['preset']
+        if preset_name not in LORA_PRESETS:
+            log_error(f"Unknown preset '{preset_name}' for node {node['node_name']}. Available presets: {list(LORA_PRESETS.keys())}")
+            continue
+        
+        preset = LORA_PRESETS[preset_name]
+        rx_sensitivity = preset['receiver_sensitivity']
+        frequency_mhz = preset['frequency_mhz']
+        frequency_hz = frequency_mhz * 1e6
+        
+        # Get TX power from CSV or use default
+        if 'tx_power_dbm' in nodes_df.columns and not pd.isna(node.get('tx_power_dbm', pd.NA)):
+            tx_power_dbm = float(node['tx_power_dbm'])
+        else:
+            tx_power_dbm = config['tx_power_dbm']
+        
+        log_info(f"  Preset: {preset_name}")
+        log_info(f"    {preset['description']}")
+        log_info(f"    Frequency: {frequency_mhz} MHz")
+        log_info(f"    Receiver Sensitivity: {rx_sensitivity} dBm")
+        log_info(f"  TX Power: {tx_power_dbm} dBm")
+        
+        # Calculate link budget for this node
+        max_path_loss = (tx_power_dbm + tx_gain + rx_gain - 
+                         rx_sensitivity - config['fade_margin_db'])
+        log_debug(f"Link budget calculation: {tx_power_dbm} + {tx_gain} + {rx_gain} - {rx_sensitivity} - {config['fade_margin_db']} = {max_path_loss:.1f} dB")
+        
+        log_info(f"  Link Budget:")
+        log_info(f"    TX Power: {tx_power_dbm} dBm")
+        log_info(f"    TX Gain: {tx_gain} dBi")
+        log_info(f"    RX Gain: {rx_gain} dBi")
+        log_info(f"    RX Sensitivity: {rx_sensitivity} dBm")
+        log_info(f"    Fade Margin: {config['fade_margin_db']} dB")
+        log_info(f"    Maximum Path Loss: {max_path_loss:.1f} dB")
         
         # Convert node location to pixel coordinates
         tx_row, tx_col = latlon_to_pixel(node['lat'], node['lon'], transform)
@@ -620,7 +630,7 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
                 # Skip if same as transmitter
                 if rx_row == tx_row and rx_col == tx_col:
                     coverage_mask[rx_row, rx_col] = True
-                    signal_strength_map[rx_row, rx_col] = config['tx_power_dbm']
+                    signal_strength_map[rx_row, rx_col] = tx_power_dbm
                     pixels_with_coverage += 1
                     continue
                 
@@ -654,7 +664,7 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
                 # log_debug(f"Pixel ({rx_row},{rx_col}) total_loss: {total_loss:.2f} dB")
                 
                 # Calculate received signal strength
-                rx_signal = config['tx_power_dbm'] + tx_gain + rx_gain - total_loss
+                rx_signal = tx_power_dbm + tx_gain + rx_gain - total_loss
                 # log_debug(f"Pixel ({rx_row},{rx_col}) rx_signal: {rx_signal:.2f} dBm, threshold: {rx_sensitivity + config['fade_margin_db']:.2f} dBm")
                 
                 # Check if signal is above sensitivity threshold (with fade margin)
@@ -1037,10 +1047,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
-    parser.add_argument('-i', '--input', help='CSV file with node data (node_name,lat,lon,elev)', default='nodes.csv')
+    parser.add_argument('-i', '--input', help='CSV file with node data (node_name,lat,lon,elev,preset[,tx_power_dbm])', default='nodes.csv')
     parser.add_argument('--config', help='JSON configuration file (optional)')
-    parser.add_argument('--lora-preset', choices=list(LORA_PRESETS.keys()),
-                       default='Long-Fast', help='LoRa preset to use')
     parser.add_argument('--resolution', type=int, choices=[30, 90], default=30,
                        help='DEM resolution in meters')
     parser.add_argument('--radius', type=float, default=30.0,
@@ -1091,10 +1099,9 @@ def main():
         log_debug("No config file specified, using defaults")
     
     # Override with command-line arguments
-    config['lora_preset'] = args.lora_preset
     config['dem_resolution_m'] = args.resolution
     config['analysis_radius_miles'] = args.radius
-    log_debug(f"Config overridden with CLI args: preset={args.lora_preset}, resolution={args.resolution}, radius={args.radius}")
+    log_debug(f"Config overridden with CLI args: resolution={args.resolution}, radius={args.radius}")
     
     log_info("="*80)
     log_info("MESHTASTIC RF COVERAGE MAPPER")
@@ -1114,10 +1121,30 @@ def main():
         log_error(f"Failed to load CSV file: {e}")
         raise
     
+    # Validate required columns
+    required_columns = ['node_name', 'lat', 'lon', 'elev', 'preset']
+    missing_columns = [col for col in required_columns if col not in nodes_df.columns]
+    if missing_columns:
+        log_error(f"CSV file is missing required columns: {missing_columns}")
+        log_error(f"Found columns: {list(nodes_df.columns)}")
+        log_error(f"Required columns: {required_columns}")
+        raise ValueError(f"Missing required columns: {missing_columns}")
+    
+    # Validate preset values
+    invalid_presets = nodes_df[~nodes_df['preset'].isin(LORA_PRESETS.keys())]['preset'].unique()
+    if len(invalid_presets) > 0:
+        log_error(f"Invalid preset names found in CSV: {list(invalid_presets)}")
+        log_error(f"Valid presets: {list(LORA_PRESETS.keys())}")
+        raise ValueError(f"Invalid preset names: {list(invalid_presets)}")
+    
     log_info(f"Loaded {len(nodes_df)} nodes:")
     for idx, node in nodes_df.iterrows():
-        log_info(f"  {node['node_name']}: {node['lat']:.6f}, {node['lon']:.6f}, {node['elev']:.1f} ft")
-        log_debug(f"Node {idx}: name={node['node_name']}, lat={node['lat']}, lon={node['lon']}, elev={node['elev']}")
+        preset_info = f", preset: {node['preset']}"
+        tx_power_info = ""
+        if 'tx_power_dbm' in nodes_df.columns and not pd.isna(node.get('tx_power_dbm')):
+            tx_power_info = f", tx_power: {node['tx_power_dbm']} dBm"
+        log_info(f"  {node['node_name']}: {node['lat']:.6f}, {node['lon']:.6f}, {node['elev']:.1f} ft{preset_info}{tx_power_info}")
+        log_debug(f"Node {idx}: name={node['node_name']}, lat={node['lat']}, lon={node['lon']}, elev={node['elev']}, preset={node['preset']}")
     
     # Calculate bounds for DEM download with generous buffer
     lat_buffer = 0.75  # degrees (~50 miles)

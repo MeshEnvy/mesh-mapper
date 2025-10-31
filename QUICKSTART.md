@@ -17,10 +17,10 @@ Or if you prefer a virtual environment, use conda or venv (recommend one of thes
 Create a CSV file named `my_nodes.csv` with your actual nodes:
 
 ```csv
-node_name,lat,lon,elev
-Node1,39.5296,-119.8138,8200
-Node2,39.3097,-119.6505,6500
-Node3,39.3436,-119.9122,10776
+node_name,lat,lon,elev,preset
+Node1,39.5296,-119.8138,8200,Long-Fast
+Node2,39.3097,-119.6505,6500,Long-Fast
+Node3,39.3436,-119.9122,10776,Medium-Fast
 ```
 
 **Important**:
@@ -28,14 +28,18 @@ Node3,39.3436,-119.9122,10776
 - Elevation must be in **feet** (not meters)
 - Elevation is the antenna height above sea level
 - Use decimal degrees for lat/lon
+- **preset** column is required - specify the LoRa preset name for each node
+- Available presets: `Long-Fast`, `Long-Moderate`, `Long-Slow`, `Medium-Fast`, `Medium-Slow`, `Short-Fast`
 
 ## 3. Run the Script
 
-Basic usage (uses Long-Fast preset, 30m resolution, 30-mile radius):
+Basic usage (30m resolution, 30-mile radius):
 
 ```bash
 python meshtastic_coverage_mapper.py my_nodes.csv
 ```
+
+The preset for each node is specified in the CSV file.
 
 ## 4. View Results
 
@@ -47,12 +51,6 @@ Check the `output/` directory for:
 - `coverage_public_interactive.html` - Interactive public map \*\*\* JUNK
 
 ## Example Command-Line Options
-
-**Use different LoRa preset:**
-
-```bash
-python meshtastic_coverage_mapper.py my_nodes.csv --lora-preset Long-Slow
-```
 
 **Use 90m resolution (faster processing):**
 
@@ -70,11 +68,12 @@ python meshtastic_coverage_mapper.py my_nodes.csv --radius 50
 
 ```bash
 python meshtastic_coverage_mapper.py my_nodes.csv \
-  --lora-preset Long-Slow \
   --resolution 90 \
   --radius 40 \
   --output-dir my_analysis
 ```
+
+**Note:** LoRa preset is specified per-node in the CSV file, not via command line.
 
 ## Testing with Sample Data
 
@@ -134,5 +133,5 @@ This uses faster 90m resolution for a quick test run.
 
 1. Review the detailed README.md for all options
 2. Adjust configuration in config_example.json for custom settings
-3. Experiment with different LoRa presets to see range differences
+3. Experiment with different LoRa presets in your CSV to see range differences
 4. Compare 30m vs 90m resolution outputs for your use case

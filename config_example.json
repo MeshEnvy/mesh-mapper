@@ -1,6 +1,4 @@
 {
-  "lora_preset": "Long-Fast",
-  "frequency_mhz": 915,
   "tx_power_dbm": 27,
   "fade_margin_db": 15,
   "analysis_radius_miles": 30,
