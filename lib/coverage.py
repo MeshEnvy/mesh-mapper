@@ -374,10 +374,30 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
     
     # Process each node
     for idx, node in nodes_df.iterrows():
-        log_info(f"\nProcessing node: {node['node_name']}")
+        log_info(f"")
+        log_info(f"Processing node: {node['node_name']}")
         log_info(f"  Location: {node['lat']:.6f}, {node['lon']:.6f}")
-        log_info(f"  Elevation: {node['elev']:.1f} ft ({feet_to_meters(node['elev']):.1f} m)")
         log_debug(f"Node index: {idx}")
+        
+        # Convert node location to pixel coordinates
+        tx_row, tx_col = latlon_to_pixel(node['lat'], node['lon'], transform)
+        log_debug(f"Node pixel coordinates: ({tx_row}, {tx_col})")
+        
+        # Check if node is within DEM bounds
+        if (tx_row < 0 or tx_row >= dem.shape[0] or 
+            tx_col < 0 or tx_col >= dem.shape[1]):
+            log_warn(f"Node outside DEM bounds (DEM shape: {dem.shape}), skipping")
+            continue
+        
+        # Get terrain elevation at transmitter location
+        tx_terrain_elev_m = dem[tx_row, tx_col]
+        tx_elev_m = feet_to_meters(node['elev'])
+        total_tx_elev_m = tx_terrain_elev_m + tx_elev_m
+        
+        log_info(f"  Elevation:")
+        log_info(f"    DEM: {tx_terrain_elev_m:.1f} m ({tx_terrain_elev_m * 3.28084:.1f} ft)")
+        log_info(f"    TX: {tx_elev_m:.1f} m ({node['elev']:.1f} ft)")
+        log_info(f"    Total: {total_tx_elev_m:.1f} m ({total_tx_elev_m * 3.28084:.1f} ft)")
         
         # Check if we should recompute or use cache
         if not should_recompute_site(node, config, str(dem_path), sites_dir):
@@ -420,19 +440,6 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
         log_info(f"    RX Sensitivity: {rx_sensitivity} dBm")
         log_info(f"    Fade Margin: {config['fade_margin_db']} dB")
         log_info(f"    Maximum Path Loss: {max_path_loss:.1f} dB")
-        
-        # Convert node location to pixel coordinates
-        tx_row, tx_col = latlon_to_pixel(node['lat'], node['lon'], transform)
-        log_debug(f"Node pixel coordinates: ({tx_row}, {tx_col})")
-        
-        # Check if node is within DEM bounds
-        if (tx_row < 0 or tx_row >= dem.shape[0] or 
-            tx_col < 0 or tx_col >= dem.shape[1]):
-            log_warn(f"Node outside DEM bounds (DEM shape: {dem.shape}), skipping")
-            continue
-        
-        tx_elev_m = feet_to_meters(node['elev'])
-        log_debug(f"Transmitter elevation: {tx_elev_m:.2f} m")
         
         # Create coverage mask for this node
         coverage_mask = np.zeros(dem.shape, dtype=bool)
