@@ -1065,6 +1065,12 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     log_debug(f"Output directory created/verified: {output_dir.exists()}")
     
+    # Create cache directory for DEM files
+    cache_dir = Path('.cache')
+    log_debug(f"Cache directory: {cache_dir}")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    log_debug(f"Cache directory created/verified: {cache_dir.exists()}")
+    
     # Load configuration
     config = DEFAULT_CONFIG.copy()
     log_debug(f"Initial config loaded: {len(config)} parameters")
@@ -1129,7 +1135,7 @@ def main():
     log_debug(f"DEM bounds with buffer: ({min_lon:.6f}, {min_lat:.6f}, {max_lon:.6f}, {max_lat:.6f})")
     
     # Download DEM data
-    dem_path = output_dir / f"dem_data_{config['dem_resolution_m']}m.tif"
+    dem_path = cache_dir / f"dem_data_{config['dem_resolution_m']}m.tif"
     log_debug(f"DEM path: {dem_path}")
     
     if not dem_path.exists():
