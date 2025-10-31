@@ -15,7 +15,7 @@ warnings.filterwarnings('ignore')
 
 # Import from lib modules
 from lib.log import set_logging, log_info, log_debug, log_error, log_warn
-from lib.dem_data import download_dem_data, load_dem_data
+from lib.dem_data import download_dem_data, load_dem_data, resample_dem
 from lib.coverage import DEFAULT_CONFIG, LORA_PRESETS, calculate_coverage_map
 from lib.site_assets import load_site_assets, sanitize_node_name
 from lib.map_gen import generate_private_map, generate_public_map
@@ -23,42 +23,57 @@ from lib.map_gen import generate_private_map, generate_public_map
 app = typer.Typer()
 
 
-def get_dem_filename(bounds: tuple, radius: float) -> str:
+def get_dem_filename(bounds: tuple, radius: float, resolution: int = None) -> str:
     """
-    Generate DEM filename from bounds and radius in format: dem_<lat1>_<lng1>_<lat2>_<lng2>_<radius>.tif
+    Generate DEM filename from bounds, radius, and resolution in format: dem_<lat1>_<lng1>_<lat2>_<lng2>_<radius>_<resolution>.tif
     
     Args:
         bounds: (min_lon, min_lat, max_lon, max_lat)
         radius: Analysis radius in miles
+        resolution: Resolution in meters (optional, defaults to None for base filename)
     
     Returns:
         Filename string
     """
     min_lon, min_lat, max_lon, max_lat = bounds
-    # Format: dem_<lat1>_<lng1>_<lat2>_<lng2>_<radius>.tif
-    return f'dem_{min_lat:.2f}_{min_lon:.2f}_{max_lat:.2f}_{max_lon:.2f}_{radius:.1f}.tif'
+    # Format: dem_<lat1>_<lng1>_<lat2>_<lng2>_<radius>_<resolution>.tif
+    if resolution is not None:
+        return f'dem_{min_lat:.2f}_{min_lon:.2f}_{max_lat:.2f}_{max_lon:.2f}_{radius:.1f}_{resolution}.tif'
+    else:
+        return f'dem_{min_lat:.2f}_{min_lon:.2f}_{max_lat:.2f}_{max_lon:.2f}_{radius:.1f}.tif'
 
 
 def find_dem_path(cache_dir: Path, resolution: int, bounds: tuple, radius: float) -> str:
     """
-    Find DEM path for specific bounds and radius in format: dem_<lat1>_<lng1>_<lat2>_<lng2>_<radius>.tif
+    Find DEM path for specific bounds, radius, and resolution.
+    Checks resolution-specific directory first, then falls back to base dem directory (for 30m only).
     
     Args:
         cache_dir: Path to cache directory
-        resolution: Resolution in meters (30 or 90)
+        resolution: Resolution in meters (30-1000)
         bounds: (min_lon, min_lat, max_lon, max_lat)
         radius: Analysis radius in miles
     
     Returns:
         Path to DEM file or None if not found
     """
+    # First check resolution-specific directory
     resolution_dir = cache_dir / str(resolution)
-    dem_filename = get_dem_filename(bounds, radius)
+    dem_filename = get_dem_filename(bounds, radius, resolution)
     dem_path = resolution_dir / dem_filename
     
     if dem_path.exists():
-        log_debug(f'Found DEM for bounds: {dem_path}')
+        log_debug(f'Found DEM for bounds in resolution directory: {dem_path}')
         return str(dem_path)
+    
+    # If resolution is 30, also check base dem directory
+    if resolution == 30:
+        dem_dir = cache_dir / 'dem'
+        dem_path = dem_dir / dem_filename
+        
+        if dem_path.exists():
+            log_debug(f'Found 30m DEM in dem directory: {dem_path}')
+            return str(dem_path)
     
     return None
 
@@ -255,7 +270,7 @@ def calculate_dem_bounds(nodes_df: pd.DataFrame, radius_miles: float) -> tuple:
 def analyze(
     input_file: str = typer.Option('nodes.csv', '--input', '-i', help='CSV file with node data (node_name,lat,lon,elev,preset[,tx_power_dbm])'),
     config: str = typer.Option(None, '--config', help='JSON configuration file (optional)'),
-    resolution: int = typer.Option(30, '--resolution', help='DEM resolution in meters'),
+    resolution: int = typer.Option(30, '--resolution', help='DEM resolution in meters (30-1000, will resample from 30m if not 30)'),
     radius: float = typer.Option(30.0, '--radius', help='Analysis radius in miles'),
     cache_dir: str = typer.Option('.cache', '--cache-dir', help='Cache directory'),
     debug: bool = typer.Option(False, '--debug', help='Enable debug output'),
@@ -269,9 +284,9 @@ def analyze(
     log_debug('Debug mode enabled')
     
     # Validate resolution
-    if resolution not in [30, 90]:
-        log_error(f'Resolution must be 30 or 90, got {resolution}')
-        raise typer.BadParameter(f'Resolution must be 30 or 90, got {resolution}')
+    if resolution < 30 or resolution > 1000:
+        log_error(f'Resolution must be between 30 and 1000 meters, got {resolution}')
+        raise typer.BadParameter(f'Resolution must be between 30 and 1000 meters, got {resolution}')
     
     # Create cache directory for DEM files and site assets
     cache_path = Path(cache_dir)
@@ -364,19 +379,53 @@ def analyze(
     log_info(f'Calculated DEM bounding box from nodes with {radius:.1f} mile buffer: ({min_lon:.6f}, {min_lat:.6f}, {max_lon:.6f}, {max_lat:.6f})')
     log_debug(f'DEM bounds: min_lon={bounds[0]:.6f}, min_lat={bounds[1]:.6f}, max_lon={bounds[2]:.6f}, max_lat={bounds[3]:.6f}')
     
-    # Download DEM data with filename: dem_<lat1>_<lng1>_<lat2>_<lng2>_<radius>.tif
-    dem_filename = get_dem_filename(bounds, radius)
-    dem_path = resolution_dir / dem_filename
-    log_debug(f'DEM path: {dem_path}')
+    # Always download/check for 30m DEM in .cache/dem/ directory
+    dem_dir = cache_path / 'dem'
+    dem_dir.mkdir(parents=True, exist_ok=True)
+    log_debug(f'DEMs directory: {dem_dir}')
     
-    if not dem_path.exists():
-        log_info(f'\nDEM file not found, downloading for bounds: ({bounds[0]:.6f}, {bounds[1]:.6f}, {bounds[2]:.6f}, {bounds[3]:.6f})')
-        log_debug('DEM file does not exist, downloading')
-        # Convert to absolute path for elevation library
-        download_dem_data(bounds, str(dem_path.absolute()), resolution)
+    # Check for requested resolution DEM first
+    dem_path_str = find_dem_path(cache_path, resolution, bounds, radius)
+    
+    if not dem_path_str:
+        log_debug(f'DEM for resolution {resolution}m not found, checking for 30m base DEM...')
+        
+        # Always ensure we have 30m DEM in dem directory
+        dem_filename_30 = get_dem_filename(bounds, radius, 30)
+        dem_path_30 = dem_dir / dem_filename_30
+        
+        if not dem_path_30.exists():
+            log_info(f'\n30m DEM file not found, downloading to {dem_dir}...')
+            log_debug(f'30m DEM path: {dem_path_30}')
+            # Convert to absolute path for elevation library
+            # SRTM tiles will be cached in .cache/srtm/ (set inside download_dem_data)
+            download_dem_data(bounds, str(dem_path_30.absolute()), 30, str(cache_path))
+        else:
+            log_info(f'\nUsing existing 30m DEM data: {dem_path_30}')
+            log_debug(f'30m DEM file exists, size: {dem_path_30.stat().st_size / 1024 / 1024:.2f} MB')
+        
+        # If requested resolution is not 30, resample from 30m
+        if resolution != 30:
+            log_info(f'\nResampling 30m DEM to {resolution}m resolution...')
+            resolution_dir.mkdir(parents=True, exist_ok=True)
+            dem_filename_res = get_dem_filename(bounds, radius, resolution)
+            dem_path_res = resolution_dir / dem_filename_res
+            
+            if not dem_path_res.exists():
+                log_info(f'Creating {resolution}m resampled DEM...')
+                resample_dem(str(dem_path_30.absolute()), str(dem_path_res.absolute()), resolution)
+                dem_path_str = str(dem_path_res)
+            else:
+                log_info(f'Using existing {resolution}m resampled DEM: {dem_path_res}')
+                dem_path_str = str(dem_path_res)
+        else:
+            # Requested resolution is 30, use the base 30m DEM
+            dem_path_str = str(dem_path_30)
     else:
-        log_info(f'\nUsing existing DEM data: {dem_path}')
-        log_debug(f'DEM file exists, size: {dem_path.stat().st_size / 1024 / 1024:.2f} MB')
+        log_info(f'\nUsing existing DEM data: {dem_path_str}')
+        log_debug(f'DEM file exists')
+    
+    dem_path = Path(dem_path_str)
     
     # Load DEM data
     log_info('\nLoading DEM data...')
@@ -404,7 +453,7 @@ def analyze(
 
 @app.command()
 def build(
-    resolution: int = typer.Option(..., '--resolution', help='DEM resolution in meters (30 or 90)'),
+    resolution: int = typer.Option(..., '--resolution', help='DEM resolution in meters (30-1000)'),
     maps_dir: str = typer.Option('maps', '--maps-dir', help='Output directory for maps'),
     cache_dir: str = typer.Option('.cache', '--cache-dir', help='Cache directory'),
     debug: bool = typer.Option(False, '--debug', help='Enable debug output'),
@@ -417,9 +466,9 @@ def build(
     log_debug(f'Command line arguments: resolution={resolution}, maps_dir={maps_dir}, cache_dir={cache_dir}, debug={debug}, silent={silent}')
     
     # Validate resolution
-    if resolution not in [30, 90]:
-        log_error(f'Resolution must be 30 or 90, got {resolution}')
-        raise typer.BadParameter(f'Resolution must be 30 or 90, got {resolution}')
+    if resolution < 30 or resolution > 1000:
+        log_error(f'Resolution must be between 30 and 1000 meters, got {resolution}')
+        raise typer.BadParameter(f'Resolution must be between 30 and 1000 meters, got {resolution}')
     
     # Convert to Path objects
     cache_path = Path(cache_dir)
