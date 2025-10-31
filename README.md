@@ -101,9 +101,9 @@ Create a CSV file with the following columns:
 
 ```csv
 node_name,lat,lon,elev,preset
-Reno_Peak,39.5296,-119.8138,8200,Long-Fast
-Virginia_City,39.3097,-119.6505,6500,Long-Fast
-Mount_Rose,39.3436,-119.9122,10776,Medium-Fast
+Reno_Peak,39.5296,-119.8138,30,Long-Fast
+Virginia_City,39.3097,-119.6505,20,Long-Fast
+Mount_Rose,39.3436,-119.9122,50,Medium-Fast
 ```
 
 Required columns:
@@ -111,7 +111,7 @@ Required columns:
 - **node_name**: Unique identifier for the node (used in map labels)
 - **lat**: Latitude in decimal degrees
 - **lon**: Longitude in decimal degrees
-- **elev**: Antenna elevation in **feet** (height above sea level, not antenna height above ground)
+- **elev**: Antenna height above ground in **feet** (e.g., 10ft for roof mount, 30ft for tower, 50ft for tall mast). The script uses DEM data for terrain elevation at the node location and adds this value to calculate total antenna height.
 - **preset**: LoRa preset name (must match one of the predefined presets)
 
 Optional columns:
@@ -286,9 +286,10 @@ The private map uses a multi-level overlap visualization:
    - Consider breaking very large regions into smaller sections
 
 5. **Antenna Height**:
-   - Script assumes fixed antenna height above ground (configured in `tx_elev_m`)
-   - Actual antenna installation height above terrain is critical for performance
-   - The elevation in the CSV should be the antenna's elevation above sea level
+   - The `elev` field in the CSV specifies antenna height above ground at that location (in feet)
+   - The script automatically derives terrain elevation from DEM data at each node's lat/lon coordinates
+   - Total antenna height = terrain elevation (from DEM) + antenna height above ground (from CSV)
+   - This allows accurate modeling when nodes are at different elevations but have different mounting heights
 
 ## Troubleshooting
 
@@ -301,8 +302,9 @@ The private map uses a multi-level overlap visualization:
 ### Coverage seems too optimistic/pessimistic
 
 - Adjust `fade_margin_db` in configuration
-- Verify antenna elevations are correct (in feet, not meters)
+- Verify antenna heights above ground in CSV are correct (in feet, not meters)
 - Check that node coordinates are accurate
+- Remember: CSV `elev` is height above ground, terrain elevation comes from DEM data
 
 ## References
 
