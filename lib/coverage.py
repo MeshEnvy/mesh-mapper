@@ -408,7 +408,20 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
         # Check if we should recompute or use cache
         if not should_recompute_site(node, config, str(dem_path), sites_dir):
             log_info(f"  Using cached data for {node['node_name']}")
-            # Skip computation - make_map.py will load from cache
+            # Load cached data and ensure PNGs exist
+            config_hash = compute_config_hash(node, config, str(dem_path))
+            from lib.site_assets import generate_site_pngs, sanitize_node_name
+            site_dir = sites_dir / sanitize_node_name(node['node_name']) / config_hash
+            
+            # Check if PNGs exist, if not generate them
+            public_png = site_dir / 'public.png'
+            private_png = site_dir / 'private.png'
+            if not (public_png.exists() and private_png.exists()):
+                log_info(f"  Generating PNGs for cached site {node['node_name']}")
+                coverage_mask_cached = np.load(str(site_dir / 'coverage_mask.npy'))
+                signal_strength_cached = np.load(str(site_dir / 'signal_strength.npy'))
+                generate_site_pngs(node, coverage_mask_cached, signal_strength_cached, dem, transform, site_dir, config)
+            
             continue
         
         # Get per-node settings from CSV
@@ -548,7 +561,7 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
         
         # Save site assets to cache
         config_hash = compute_config_hash(node, config, str(dem_path))
-        save_site_assets(node, coverage_mask, signal_strength_map, config_hash, sites_dir, config, str(dem_path))
+        save_site_assets(node, coverage_mask, signal_strength_map, config_hash, sites_dir, config, str(dem_path), dem, transform)
         log_info(f"  Saved assets for {node['node_name']} to cache")
     
     elapsed_total = time.time() - total_start_time

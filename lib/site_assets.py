@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Dict
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+from matplotlib.colors import LightSource
+import rasterio
 
 from lib.log import log_debug
 
@@ -113,9 +117,138 @@ def compute_config_hash(node_data: pd.Series, config: Dict, dem_path: str) -> st
     return hash_obj.hexdigest()
 
 
+def generate_site_pngs(node_data: pd.Series, coverage_mask: np.ndarray,
+                       signal_strength: np.ndarray, dem: np.ndarray,
+                       transform: rasterio.Affine, site_dir: Path, config: Dict):
+    """
+    Generate public.png and private.png for a single site.
+    
+    Args:
+        node_data: Series with node CSV fields
+        coverage_mask: Boolean array of coverage
+        signal_strength: Float array of signal strength
+        dem: Digital elevation model array
+        transform: Rasterio transform for coordinate conversion
+        site_dir: Directory where PNGs should be saved
+        config: Configuration dictionary
+    """
+    node_name = node_data['node_name']
+    
+    # Check if PNGs already exist
+    public_png = site_dir / 'public.png'
+    private_png = site_dir / 'private.png'
+    
+    if public_png.exists() and private_png.exists():
+        log_debug(f"PNGs already exist for {node_name}, skipping generation")
+        return
+    
+    # Get geographic extent
+    height, width = dem.shape
+    min_lon, max_lat = transform * (0, 0)
+    max_lon, min_lat = transform * (width, height)
+    
+    # Generate private.png if it doesn't exist
+    if not private_png.exists():
+        log_debug(f"Generating private.png for {node_name}")
+        fig, ax = plt.subplots(figsize=(16, 12))
+        
+        # Hillshade background
+        ls = LightSource(azdeg=315, altdeg=45)
+        hillshade = ls.hillshade(dem, vert_exag=0.05)
+        ax.imshow(hillshade, cmap='gray', alpha=0.5,
+                 extent=[min_lon, max_lon, min_lat, max_lat],
+                 aspect='auto', origin='upper')
+        
+        # Coverage overlay
+        coverage_display = np.ma.masked_where(~coverage_mask, coverage_mask)
+        ax.imshow(coverage_display, cmap='Greens', alpha=0.6,
+                 extent=[min_lon, max_lon, min_lat, max_lat],
+                 aspect='auto', origin='upper', vmin=0, vmax=1)
+        
+        # Node location
+        ax.plot(node_data['lon'], node_data['lat'], 'r*', markersize=30,
+               markeredgecolor='black', markeredgewidth=2, zorder=10)
+        ax.annotate(node_name, (node_data['lon'], node_data['lat']),
+                   xytext=(8, 8), textcoords='offset points',
+                   bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow',
+                            edgecolor='black', alpha=0.9, linewidth=1.5),
+                   fontsize=10, fontweight='bold', zorder=11)
+        
+        ax.set_xlim(min_lon, max_lon)
+        ax.set_ylim(min_lat, max_lat)
+        ax.set_xlabel('Longitude (°W)', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Latitude (°N)', fontsize=12, fontweight='bold')
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{abs(x):.3f}°W'))
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, p: f'{y:.3f}°N'))
+        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, color='black')
+        
+        # Calculate coverage stats
+        pixel_area_km2 = (abs(transform[0]) * 111.32) ** 2
+        coverage_area_km2 = coverage_mask.sum() * pixel_area_km2
+        coverage_area_sqmi = coverage_area_km2 * 0.386102
+        
+        radius_text = ""
+        if 'analysis_radius_miles' in config:
+            radius_text = f" | Radius: {config['analysis_radius_miles']:.0f} mi"
+        
+        ax.set_title(f'{node_name} - Coverage Map\n'
+                    f'Coverage: {coverage_area_km2:.1f} km² ({coverage_area_sqmi:.1f} sq mi){radius_text}',
+                    fontsize=14, fontweight='bold', pad=15)
+        
+        plt.tight_layout()
+        plt.savefig(str(private_png), dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        log_debug(f"Saved private.png to {private_png}")
+    
+    # Generate public.png if it doesn't exist
+    if not public_png.exists():
+        log_debug(f"Generating public.png for {node_name}")
+        fig, ax = plt.subplots(figsize=(16, 12))
+        
+        # Hillshade background
+        ls = LightSource(azdeg=315, altdeg=45)
+        hillshade = ls.hillshade(dem, vert_exag=0.05)
+        ax.imshow(hillshade, cmap='gray', alpha=0.6,
+                 extent=[min_lon, max_lon, min_lat, max_lat],
+                 aspect='auto', origin='upper')
+        
+        # Coverage overlay (red for public)
+        coverage_display = np.ma.masked_where(~coverage_mask, coverage_mask)
+        ax.imshow(coverage_display, cmap='Reds', alpha=0.8,
+                 extent=[min_lon, max_lon, min_lat, max_lat],
+                 aspect='auto', origin='upper', vmin=0, vmax=1)
+        
+        ax.set_xlim(min_lon, max_lon)
+        ax.set_ylim(min_lat, max_lat)
+        ax.set_xlabel('Longitude (°W)', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Latitude (°N)', fontsize=12, fontweight='bold')
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{abs(x):.3f}°W'))
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, p: f'{y:.3f}°N'))
+        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5, color='black')
+        
+        # Coverage stats
+        pixel_area_km2 = (abs(transform[0]) * 111.32) ** 2
+        coverage_area_km2 = coverage_mask.sum() * pixel_area_km2
+        coverage_area_sqmi = coverage_area_km2 * 0.386102
+        
+        radius_text = ""
+        if 'analysis_radius_miles' in config:
+            radius_text = f" | Radius: {config['analysis_radius_miles']:.0f} mi"
+        
+        ax.set_title(f'RF Coverage Map\n'
+                    f'Coverage: {coverage_area_km2:.1f} km² ({coverage_area_sqmi:.1f} sq mi){radius_text}',
+                    fontsize=14, fontweight='bold', pad=15)
+        
+        plt.tight_layout()
+        plt.savefig(str(public_png), dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        log_debug(f"Saved public.png to {public_png}")
+
+
 def save_site_assets(node_data: pd.Series, coverage_mask: np.ndarray,
                      signal_strength: np.ndarray, config_hash: str,
-                     sites_dir: Path, config: Dict, dem_path: str):
+                     sites_dir: Path, config: Dict, dem_path: str,
+                     dem: np.ndarray = None, transform: rasterio.Affine = None):
     """
     Save site coverage assets to disk in <sites_dir>/<name>/<config-hash>/ structure.
     
@@ -127,6 +260,8 @@ def save_site_assets(node_data: pd.Series, coverage_mask: np.ndarray,
         sites_dir: Path to sites directory
         config: Configuration dictionary
         dem_path: Path to DEM file (required)
+        dem: Digital elevation model array (optional, needed for PNG generation)
+        transform: Rasterio transform (optional, needed for PNG generation)
     
     Raises:
         ValueError: If dem_path is not provided or file doesn't exist
@@ -162,6 +297,10 @@ def save_site_assets(node_data: pd.Series, coverage_mask: np.ndarray,
         f.write(config_hash)
     
     log_debug(f"Saved site assets for {node_name} to {site_dir}")
+    
+    # Generate PNGs if DEM and transform are provided
+    if dem is not None and transform is not None:
+        generate_site_pngs(node_data, coverage_mask, signal_strength, dem, transform, site_dir, config)
 
 
 def list_config_variants(site_name: str, sites_dir: Path) -> list:
