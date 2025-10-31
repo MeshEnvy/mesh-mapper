@@ -3,11 +3,14 @@
 ## 1. Install Dependencies
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+which python
+which pip
 pip install -r requirements.txt --break-system-packages
 ```
 
 Or if you prefer a virtual environment, use conda or venv (recommend one of these)
-
 
 ## 2. Prepare Your Node Data
 
@@ -20,7 +23,8 @@ Node2,39.3097,-119.6505,6500
 Node3,39.3436,-119.9122,10776
 ```
 
-**Important**: 
+**Important**:
+
 - Elevation must be in **feet** (not meters)
 - Elevation is the antenna height above sea level
 - Use decimal degrees for lat/lon
@@ -36,29 +40,34 @@ python meshtastic_coverage_mapper.py my_nodes.csv
 ## 4. View Results
 
 Check the `output/` directory for:
+
 - `coverage_private.png` - Detailed map with node locations
 - `coverage_public.png` - Public map without node locations
-- `coverage_private_interactive.html` - Interactive private map *** JUNK
-- `coverage_public_interactive.html` - Interactive public map *** JUNK
+- `coverage_private_interactive.html` - Interactive private map \*\*\* JUNK
+- `coverage_public_interactive.html` - Interactive public map \*\*\* JUNK
 
 ## Example Command-Line Options
 
 **Use different LoRa preset:**
+
 ```bash
 python meshtastic_coverage_mapper.py my_nodes.csv --lora-preset Long-Slow
 ```
 
 **Use 90m resolution (faster processing):**
+
 ```bash
 python meshtastic_coverage_mapper.py my_nodes.csv --resolution 90
 ```
 
 **Analyze 50-mile radius:**
+
 ```bash
 python meshtastic_coverage_mapper.py my_nodes.csv --radius 50
 ```
 
 **Combine multiple options:**
+
 ```bash
 python meshtastic_coverage_mapper.py my_nodes.csv \
   --lora-preset Long-Slow \
@@ -80,16 +89,18 @@ This uses faster 90m resolution for a quick test run.
 ## What to Expect
 
 ### First Run
+
 - Downloads DEM terrain data (may take 2-10 minutes depending on area size)
 - Calculates coverage (5-30 minutes depending on resolution and number of nodes)
 - Generates all map outputs
 
 ### Subsequent Runs
+
 - Uses cached DEM data (much faster)
 - Only recalculates coverage if you change nodes or settings
 
-
 ### Private Map (coverage_private.png)
+
 - Shows exact node locations with names
 - Different colors indicate overlap:
   - Green: Single node coverage
@@ -99,6 +110,7 @@ This uses faster 90m resolution for a quick test run.
 - Use this for planning and network optimization
 
 ### Public Map (coverage_public.png)
+
 - Shows only the coverage area
 - No node locations revealed
 - Single color for all coverage
@@ -107,11 +119,13 @@ This uses faster 90m resolution for a quick test run.
 ## Common Issues
 
 **Script is slow:**
+
 - Use `--resolution 90` for faster processing
 - Reduce `--radius` value
 - Test with fewer nodes first
 
 **No coverage shown:**
+
 - Verify node coordinates are correct
 - Check elevation values (should be in feet)
 - Try sample data first to verify setup
