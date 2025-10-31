@@ -374,35 +374,35 @@ def check_line_of_sight(dem: np.ndarray, transform: rasterio.Affine,
     # Get terrain elevations
     tx_terrain = dem[tx_row, tx_col]
     rx_terrain = dem[rx_row, rx_col]
-    log_debug(f"Line-of-sight check: tx_terrain={tx_terrain:.1f}m, rx_terrain={rx_terrain:.1f}m")
+    # log_debug(f"Line-of-sight check: tx_terrain={tx_terrain:.1f}m, rx_terrain={rx_terrain:.1f}m")
     
     # Absolute elevations of antennas
     tx_height = tx_terrain + tx_elev
     rx_height = rx_terrain + 1.5  # Assume 1.5m receiver height
-    log_debug(f"Antenna heights: tx={tx_height:.1f}m, rx={rx_height:.1f}m")
+    # log_debug(f"Antenna heights: tx={tx_height:.1f}m, rx={rx_height:.1f}m")
     
     # Use Bresenham's line algorithm to get all pixels along the path
     path_pixels = bresenham_line(tx_row, tx_col, rx_row, rx_col)
-    log_debug(f"Path length: {len(path_pixels)} pixels")
+    # log_debug(f"Path length: {len(path_pixels)} pixels")
     
     if len(path_pixels) < 2:
-        log_debug("Same location, LOS = True")
+        # log_debug("Same location, LOS = True")
         return True, 0.0  # Same location
     
     # Calculate distance between endpoints
     tx_lat, tx_lon = pixel_to_latlon(tx_row, tx_col, transform)
     rx_lat, rx_lon = pixel_to_latlon(rx_row, rx_col, transform)
     total_distance = haversine_distance(tx_lat, tx_lon, rx_lat, rx_lon)
-    log_debug(f"Total distance: {total_distance:.1f}m")
+    # log_debug(f"Total distance: {total_distance:.1f}m")
     
     if total_distance < 1:  # Less than 1 meter
-        log_debug("Distance < 1m, LOS = True")
+        # log_debug("Distance < 1m, LOS = True")
         return True, 0.0
     
     # Calculate required Fresnel zone clearance
     fresnel_rad = fresnel_radius(total_distance, frequency_hz, zone=1)
     required_clearance = fresnel_clearance * fresnel_rad
-    log_debug(f"Fresnel radius: {fresnel_rad:.2f}m, required clearance: {required_clearance:.2f}m")
+    # log_debug(f"Fresnel radius: {fresnel_rad:.2f}m, required clearance: {required_clearance:.2f}m")
     
     max_obstruction = 0.0  # Track worst obstruction
     
@@ -434,11 +434,11 @@ def check_line_of_sight(dem: np.ndarray, transform: rasterio.Affine,
         
         if obstruction > max_obstruction:
             max_obstruction = obstruction
-            log_debug(f"New max obstruction at pixel ({row},{col}): {max_obstruction:.2f}m")
+            # log_debug(f"New max obstruction at pixel ({row},{col}): {max_obstruction:.2f}m")
     
     # Determine if path is viable
     has_los = max_obstruction <= 0
-    log_debug(f"LOS result: {has_los}, max_obstruction: {max_obstruction:.2f}m")
+    # log_debug(f"LOS result: {has_los}, max_obstruction: {max_obstruction:.2f}m")
     
     # Calculate additional loss due to partial obstruction
     # Using knife-edge diffraction approximation
@@ -447,13 +447,13 @@ def check_line_of_sight(dem: np.ndarray, transform: rasterio.Affine,
         # Normalized obstruction parameter
         wavelength = wavelength_from_frequency(frequency_hz)
         v = max_obstruction * np.sqrt(2 / (wavelength * (total_distance / 2)))
-        log_debug(f"Knife-edge parameter v: {v:.3f}")
+        # log_debug(f"Knife-edge parameter v: {v:.3f}")
         
         if v < -0.8:
             obstruction_loss_db = 0
         else:
             obstruction_loss_db = 6.9 + 20 * np.log10(np.sqrt((v - 0.1)**2 + 1) + v - 0.1)
-        log_debug(f"Obstruction loss: {obstruction_loss_db:.2f} dB")
+        # log_debug(f"Obstruction loss: {obstruction_loss_db:.2f} dB")
     
     return has_los, obstruction_loss_db
 
@@ -615,7 +615,7 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
                 # Show progress
                 if pixels_to_check % progress_interval == 0:
                     progress_pct = (pixels_to_check / total_pixels) * 100
-                    log_debug(f"Progress: {progress_pct:.0f}% ({pixels_to_check:,}/{total_pixels:,} pixels)")
+                    log_info(f"Progress: {progress_pct:.0f}% ({pixels_to_check:,}/{total_pixels:,} pixels)")
                 
                 # Skip if same as transmitter
                 if rx_row == tx_row and rx_col == tx_col:
@@ -627,11 +627,11 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
                 # Calculate distance
                 rx_lat, rx_lon = pixel_to_latlon(rx_row, rx_col, transform)
                 distance_m = haversine_distance(node['lat'], node['lon'], rx_lat, rx_lon)
-                log_debug(f"Pixel ({rx_row},{rx_col}) distance: {distance_m:.1f} m")
+                # log_debug(f"Pixel ({rx_row},{rx_col}) distance: {distance_m:.1f} m")
                 
                 # Skip if beyond analysis radius
                 if distance_m > analysis_radius_m:
-                    log_debug(f"Pixel ({rx_row},{rx_col}) beyond radius, skipping")
+                    # log_debug(f"Pixel ({rx_row},{rx_col}) beyond radius, skipping")
                     continue
                 
                 # Check line of sight
@@ -639,30 +639,30 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
                     dem, transform, tx_row, tx_col, tx_elev_m, rx_row, rx_col,
                     frequency_hz, config['fresnel_zone_clearance'], config['earth_radius_km']
                 )
-                log_debug(f"Pixel ({rx_row},{rx_col}) LOS: {has_los}, obstruction_loss: {obstruction_loss:.2f} dB")
+                # log_debug(f"Pixel ({rx_row},{rx_col}) LOS: {has_los}, obstruction_loss: {obstruction_loss:.2f} dB")
                 
                 if not has_los:
-                    log_debug(f"Pixel ({rx_row},{rx_col}) no LOS, skipping")
+                    # log_debug(f"Pixel ({rx_row},{rx_col}) no LOS, skipping")
                     continue  # No coverage if no line of sight
                 
                 # Calculate path loss
                 path_loss = calculate_two_ray_path_loss(distance_m, frequency_hz, tx_elev_m)
-                log_debug(f"Pixel ({rx_row},{rx_col}) path_loss: {path_loss:.2f} dB")
+                # log_debug(f"Pixel ({rx_row},{rx_col}) path_loss: {path_loss:.2f} dB")
                 
                 # Add obstruction loss if any
                 total_loss = path_loss + obstruction_loss
-                log_debug(f"Pixel ({rx_row},{rx_col}) total_loss: {total_loss:.2f} dB")
+                # log_debug(f"Pixel ({rx_row},{rx_col}) total_loss: {total_loss:.2f} dB")
                 
                 # Calculate received signal strength
                 rx_signal = config['tx_power_dbm'] + tx_gain + rx_gain - total_loss
-                log_debug(f"Pixel ({rx_row},{rx_col}) rx_signal: {rx_signal:.2f} dBm, threshold: {rx_sensitivity + config['fade_margin_db']:.2f} dBm")
+                # log_debug(f"Pixel ({rx_row},{rx_col}) rx_signal: {rx_signal:.2f} dBm, threshold: {rx_sensitivity + config['fade_margin_db']:.2f} dBm")
                 
                 # Check if signal is above sensitivity threshold (with fade margin)
                 if rx_signal >= (rx_sensitivity + config['fade_margin_db']):
                     coverage_mask[rx_row, rx_col] = True
                     signal_strength_map[rx_row, rx_col] = rx_signal
                     pixels_with_coverage += 1
-                    log_debug(f"Pixel ({rx_row},{rx_col}) has coverage, signal: {rx_signal:.2f} dBm")
+                    # log_debug(f"Pixel ({rx_row},{rx_col}) has coverage, signal: {rx_signal:.2f} dBm")
         
         log_debug("Pixel analysis complete")
         coverage_area_km2 = pixels_with_coverage * (pixel_size * 111.32) ** 2
