@@ -1,5 +1,6 @@
 """RF coverage calculation functions."""
 
+import time
 import numpy as np
 import pandas as pd
 import rasterio
@@ -372,8 +373,13 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
     coverage_data = {}
     log_debug(f"Processing {len(nodes_df)} nodes")
     
+    # Start total timer
+    total_start_time = time.time()
+    
     # Process each node
     for idx, node in nodes_df.iterrows():
+        # Start timer for this node
+        node_start_time = time.time()
         log_info(f"")
         log_info(f"Processing node: {node['node_name']}")
         log_info(f"  Location: {node['lat']:.6f}, {node['lon']:.6f}")
@@ -477,7 +483,8 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
                 # Show progress
                 if pixels_to_check % progress_interval == 0:
                     progress_pct = (pixels_to_check / total_pixels) * 100
-                    log_info(f"Progress: {progress_pct:.0f}% ({pixels_to_check:,}/{total_pixels:,} pixels)")
+                    elapsed_node = time.time() - node_start_time
+                    log_info(f"Progress: {progress_pct:.0f}% ({pixels_to_check:,}/{total_pixels:,} pixels) - elapsed: {elapsed_node:.1f}s")
                 
                 # Skip if same as transmitter
                 if rx_row == tx_row and rx_col == tx_col:
@@ -521,7 +528,8 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
         log_debug("Pixel analysis complete")
         coverage_area_km2 = pixels_with_coverage * (pixel_size * 111.32) ** 2
         
-        log_info(f"  ✓ Analysis complete!")
+        elapsed_node = time.time() - node_start_time
+        log_info(f"  ✓ Analysis complete! (elapsed: {elapsed_node:.1f}s)")
         log_info(f"  Pixels checked: {pixels_to_check:,}")
         log_info(f"  Pixels with coverage: {pixels_with_coverage:,}")
         log_info(f"  Coverage area: {coverage_area_km2:.1f} km² ({coverage_area_km2 * 0.386102:.1f} sq mi)")
@@ -543,6 +551,7 @@ def calculate_coverage_map(nodes_df: pd.DataFrame, dem: np.ndarray,
         save_site_assets(node, coverage_mask, signal_strength_map, config_hash, sites_dir, config, str(dem_path))
         log_info(f"  Saved assets for {node['node_name']} to cache")
     
-    log_info(f"Coverage calculation complete for {len(coverage_data)} nodes")
+    elapsed_total = time.time() - total_start_time
+    log_info(f"Coverage calculation complete for {len(coverage_data)} nodes (total elapsed: {elapsed_total:.1f}s)")
     return coverage_data
 
