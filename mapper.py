@@ -22,22 +22,39 @@ from lib.map_gen import generate_private_map, generate_public_map
 app = typer.Typer()
 
 
-def find_dem_path(cache_dir: Path, resolution: int) -> str:
+def get_dem_filename(bounds: tuple) -> str:
     """
-    Find DEM path deterministically from <cache-dir>/<resolution>/dem_data.tif.
+    Generate DEM filename from bounds in format: dem_<lat1>_<lng1>_<lat2>_<lng2>.tif
+    
+    Args:
+        bounds: (min_lon, min_lat, max_lon, max_lat)
+    
+    Returns:
+        Filename string
+    """
+    min_lon, min_lat, max_lon, max_lat = bounds
+    # Format: dem_<lat1>_<lng1>_<lat2>_<lng2>.tif
+    return f'dem_{min_lat:.2f}_{min_lon:.2f}_{max_lat:.2f}_{max_lon:.2f}.tif'
+
+
+def find_dem_path(cache_dir: Path, resolution: int, bounds: tuple) -> str:
+    """
+    Find DEM path for specific bounds in format: dem_<lat1>_<lng1>_<lat2>_<lng2>.tif
     
     Args:
         cache_dir: Path to cache directory
         resolution: Resolution in meters (30 or 90)
+        bounds: (min_lon, min_lat, max_lon, max_lat)
     
     Returns:
-        Path to DEM file or None
+        Path to DEM file or None if not found
     """
     resolution_dir = cache_dir / str(resolution)
-    dem_path = resolution_dir / 'dem_data.tif'
+    dem_filename = get_dem_filename(bounds)
+    dem_path = resolution_dir / dem_filename
     
     if dem_path.exists():
-        log_debug(f'Found DEM at deterministic location: {dem_path}')
+        log_debug(f'Found DEM for bounds: {dem_path}')
         return str(dem_path)
     
     return None
@@ -202,6 +219,10 @@ def analyze(
     resolution: int = typer.Option(30, '--resolution', help='DEM resolution in meters'),
     radius: float = typer.Option(30.0, '--radius', help='Analysis radius in miles'),
     cache_dir: str = typer.Option('.cache', '--cache-dir', help='Cache directory'),
+    min_lat: float = typer.Option(35.0, '--min-lat', help='Minimum latitude for DEM bounding box (default: 35.0 for Nevada)'),
+    max_lat: float = typer.Option(42.0, '--max-lat', help='Maximum latitude for DEM bounding box (default: 42.0 for Nevada)'),
+    min_lon: float = typer.Option(-120.0, '--min-lon', help='Minimum longitude for DEM bounding box (default: -120.0 for Nevada)'),
+    max_lon: float = typer.Option(-114.0, '--max-lon', help='Maximum longitude for DEM bounding box (default: -114.0 for Nevada)'),
     debug: bool = typer.Option(False, '--debug', help='Enable debug output'),
     silent: bool = typer.Option(False, '--silent', help='Suppress all output'),
 ):
@@ -211,7 +232,7 @@ def analyze(
     # Set up logging
     set_logging(debug=debug, silent=silent)
     log_debug('Debug mode enabled')
-    log_debug(f'Command line arguments: input={input_file}, config={config}, resolution={resolution}, radius={radius}, cache_dir={cache_dir}, debug={debug}, silent={silent}')
+    log_debug(f'Command line arguments: input={input_file}, config={config}, resolution={resolution}, radius={radius}, cache_dir={cache_dir}, bounds=({min_lon}, {min_lat}, {max_lon}, {max_lat}), debug={debug}, silent={silent}')
     
     # Validate resolution
     if resolution not in [30, 90]:
@@ -303,27 +324,26 @@ def analyze(
         log_info(f"  {node['node_name']}: {node['lat']:.6f}, {node['lon']:.6f}, {node['elev']:.1f} ft{preset_info}{tx_power_info}")
         log_debug(f"Node {idx}: name={node['node_name']}, lat={node['lat']}, lon={node['lon']}, elev={node['elev']}, preset={node['preset']}")
     
-    # Calculate bounds for DEM download with generous buffer
-    lat_buffer = 0.75  # degrees (~50 miles)
-    lon_buffer = 0.75
-    log_debug(f'Buffer for DEM bounds: lat={lat_buffer}°, lon={lon_buffer}°')
-    
-    min_lat = nodes_df['lat'].min() - lat_buffer
-    max_lat = nodes_df['lat'].max() + lat_buffer
-    min_lon = nodes_df['lon'].min() - lon_buffer
-    max_lon = nodes_df['lon'].max() + lon_buffer
-    log_debug(f"Node bounds: lat=[{nodes_df['lat'].min():.6f}, {nodes_df['lat'].max():.6f}], "
-              f"lon=[{nodes_df['lon'].min():.6f}, {nodes_df['lon'].max():.6f}]")
+    # Use bounding box from CLI arguments (defaults to Nevada state bounds)
+    # Validate bounds
+    if min_lat >= max_lat:
+        log_error(f'min_lat ({min_lat}) must be less than max_lat ({max_lat})')
+        raise typer.BadParameter(f'min_lat must be less than max_lat')
+    if min_lon >= max_lon:
+        log_error(f'min_lon ({min_lon}) must be less than max_lon ({max_lon})')
+        raise typer.BadParameter(f'min_lon must be less than max_lon')
     
     bounds = (min_lon, min_lat, max_lon, max_lat)
-    log_debug(f'DEM bounds with buffer: ({min_lon:.6f}, {min_lat:.6f}, {max_lon:.6f}, {max_lat:.6f})')
+    log_info(f'Using DEM bounding box: ({min_lon:.6f}, {min_lat:.6f}, {max_lon:.6f}, {max_lat:.6f})')
+    log_debug(f'DEM bounds: min_lon={bounds[0]:.6f}, min_lat={bounds[1]:.6f}, max_lon={bounds[2]:.6f}, max_lat={bounds[3]:.6f}')
     
-    # Download DEM data to <cache-dir>/<resolution>/dem_data.tif
-    # (reusing resolution_dir created earlier at line 61)
-    dem_path = resolution_dir / 'dem_data.tif'
+    # Download DEM data with filename: dem_<lat1>_<lng1>_<lat2>_<lng2>.tif
+    dem_filename = get_dem_filename(bounds)
+    dem_path = resolution_dir / dem_filename
     log_debug(f'DEM path: {dem_path}')
     
     if not dem_path.exists():
+        log_info(f'\nDEM file not found, downloading for bounds: ({bounds[0]:.6f}, {bounds[1]:.6f}, {bounds[2]:.6f}, {bounds[3]:.6f})')
         log_debug('DEM file does not exist, downloading')
         # Convert to absolute path for elevation library
         download_dem_data(bounds, str(dem_path.absolute()), resolution)
@@ -360,6 +380,10 @@ def build(
     resolution: int = typer.Option(..., '--resolution', help='DEM resolution in meters (30 or 90)'),
     maps_dir: str = typer.Option('maps', '--maps-dir', help='Output directory for maps'),
     cache_dir: str = typer.Option('.cache', '--cache-dir', help='Cache directory'),
+    min_lat: float = typer.Option(35.0, '--min-lat', help='Minimum latitude for DEM bounding box (default: 35.0 for Nevada)'),
+    max_lat: float = typer.Option(42.0, '--max-lat', help='Maximum latitude for DEM bounding box (default: 42.0 for Nevada)'),
+    min_lon: float = typer.Option(-120.0, '--min-lon', help='Minimum longitude for DEM bounding box (default: -120.0 for Nevada)'),
+    max_lon: float = typer.Option(-114.0, '--max-lon', help='Maximum longitude for DEM bounding box (default: -114.0 for Nevada)'),
     debug: bool = typer.Option(False, '--debug', help='Enable debug output'),
     silent: bool = typer.Option(False, '--silent', help='Suppress all output'),
 ):
@@ -374,6 +398,16 @@ def build(
         log_error(f'Resolution must be 30 or 90, got {resolution}')
         raise typer.BadParameter(f'Resolution must be 30 or 90, got {resolution}')
     
+    # Validate bounds
+    if min_lat >= max_lat:
+        log_error(f'min_lat ({min_lat}) must be less than max_lat ({max_lat})')
+        raise typer.BadParameter(f'min_lat must be less than max_lat')
+    if min_lon >= max_lon:
+        log_error(f'min_lon ({min_lon}) must be less than max_lon ({max_lon})')
+        raise typer.BadParameter(f'min_lon must be less than max_lon')
+    
+    bounds = (min_lon, min_lat, max_lon, max_lat)
+    
     # Convert to Path objects
     cache_path = Path(cache_dir)
     resolution_dir = cache_path / str(resolution)
@@ -385,12 +419,13 @@ def build(
     log_info("="*80)
     log_info(f'Resolution: {resolution}m')
     log_info(f'Cache directory: {cache_path}')
+    log_info(f'DEM bounding box: ({min_lon:.6f}, {min_lat:.6f}, {max_lon:.6f}, {max_lat:.6f})')
     
-    # Find DEM path deterministically from cache directory
+    # Find DEM path from cache directory
     log_info('\nLocating DEM file...')
-    dem_path_str = find_dem_path(cache_path, resolution)
+    dem_path_str = find_dem_path(cache_path, resolution, bounds)
     if not dem_path_str:
-        log_error(f'Could not find DEM file at {resolution_dir / "dem_data.tif"}')
+        log_error(f'Could not find DEM file for bounds in {resolution_dir}')
         log_error('Run mapper.py analyze first to download DEM data')
         return
     

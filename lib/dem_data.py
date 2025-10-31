@@ -94,3 +94,44 @@ def pixel_to_latlon(row: int, col: int, transform: rasterio.Affine) -> Tuple[flo
     lon, lat = transform * (col, row)
     return lat, lon
 
+
+def get_dem_bounds(dem_path: str) -> Tuple[float, float, float, float]:
+    """
+    Get the geographic bounds of a DEM file.
+    
+    Returns:
+        (min_lon, min_lat, max_lon, max_lat)
+    """
+    with rasterio.open(dem_path) as src:
+        bounds = src.bounds
+        return (bounds.left, bounds.bottom, bounds.right, bounds.top)
+
+
+def dem_covers_bounds(dem_path: str, required_bounds: Tuple[float, float, float, float]) -> bool:
+    """
+    Check if an existing DEM file covers the required bounding box.
+    
+    Args:
+        dem_path: Path to DEM file
+        required_bounds: (min_lon, min_lat, max_lon, max_lat)
+    
+    Returns:
+        True if DEM covers the required bounds, False otherwise
+    """
+    try:
+        dem_bounds = get_dem_bounds(dem_path)
+        req_min_lon, req_min_lat, req_max_lon, req_max_lat = required_bounds
+        dem_min_lon, dem_min_lat, dem_max_lon, dem_max_lat = dem_bounds
+        
+        # Check if DEM bounds fully contain required bounds
+        covers = (dem_min_lon <= req_min_lon and 
+                 dem_min_lat <= req_min_lat and 
+                 dem_max_lon >= req_max_lon and 
+                 dem_max_lat >= req_max_lat)
+        
+        log_debug(f"DEM bounds check: DEM={dem_bounds}, Required={required_bounds}, Covers={covers}")
+        return covers
+    except Exception as e:
+        log_debug(f"Error checking DEM bounds: {e}, assuming no coverage")
+        return False
+
