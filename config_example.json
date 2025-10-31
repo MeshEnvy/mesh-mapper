@@ -1,0 +1,12 @@
+{
+  "lora_preset": "Long-Fast",
+  "frequency_mhz": 915,
+  "tx_power_dbm": 27,
+  "fade_margin_db": 15,
+  "analysis_radius_miles": 30,
+  "dem_resolution_m": 30,
+  "fresnel_zone_clearance": 0.6,
+  "earth_radius_km": 6371,
+  "antenna_gain_dbi": 2.15,
+  "num_azimuths": 360
+}
